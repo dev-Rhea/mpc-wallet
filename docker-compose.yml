@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 1. Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: mpc-wallet-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: wallet_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mpc-network
+
+  # 2. Redis (Cache/Queue)
+  redis:
+    image: redis:alpine
+    container_name: mpc-wallet-redis
+    ports:
+      - '6379:6379'
+    networks:
+      - mpc-network
+
+  # 3. API Server (Backend)
+  api:
+    build: .
+    container_name: mpc-api
+    command: sh -c "npx prisma migrate deploy && node dist/api/app.js"
+    ports:
+      - '3000:3000'
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/wallet_db?schema=public
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mpc-network
+
+  # 4. Worker (Background Service)
+  worker:
+    build: .
+    container_name: mpc-worker
+    command: node dist/worker/worker.js
+    # No ports exposed (Internal Only)
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/wallet_db?schema=public
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - mpc-network
+
+networks:
+  mpc-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

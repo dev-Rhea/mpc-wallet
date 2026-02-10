@@ -1,0 +1,147 @@
+// DB: PostgreSQL
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. 조직 및 사용자
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  users     User[]
+  wallets   Wallet[]
+  policies  ApprovalPolicy[]
+  addressBook AddressBook[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  orgId     String
+  email     String   @unique
+  role      String   // ADMIN, APPROVER, REQUESTER, CFO, MANAGER
+  keyShares KeyShare[] // 이 유저가 가진 키 파편들
+  
+  organization Organization @relation(fields: [orgId], references: [id])
+}
+
+// 2. 지갑 및 키 관리 (KMS)
+model Wallet {
+  id             String   @id @default(uuid())
+  orgId          String
+  address        String   @unique
+  privateKey     String?
+  thresholdCount Int      @default(2) // 2-of-n
+  kmsKeyId       String   // AWS KMS Master Key ID
+  createdAt      DateTime @default(now())
+  
+  organization   Organization @relation(fields: [orgId], references: [id])
+  keyShares      KeyShare[]
+  requests       TransferRequest[]
+  reconciliations ReconciliationRecord[]
+  policy    WalletPolicy?
+}
+
+model KeyShare {
+  id             String   @id @default(uuid())
+  walletId       String
+  ownerId        String   // 파편의 소유자
+  encryptedShare String   // KMS로 암호화된 파편
+  keyIndex       Int      // Shamir Index
+  
+  wallet         Wallet @relation(fields: [walletId], references: [id])
+  owner          User   @relation(fields: [ownerId], references: [id])
+}
+
+// 3. 승인 정책 및 화이트리스트
+model ApprovalPolicy {
+  id           String   @id @default(uuid())
+  orgId        String
+  minAmount    Decimal
+  maxAmount    Decimal?
+  requiredRole String   // 예: CFO
+  organization Organization @relation(fields: [orgId], references: [id])
+}
+
+model AddressBook {
+  id            String  @id @default(uuid())
+  orgId         String
+  address       String
+  isWhitelisted Boolean @default(true)
+  organization  Organization @relation(fields: [orgId], references: [id])
+  @@unique([orgId, address])
+}
+
+// 4. 요청 및 승인 워크플로우
+model TransferRequest {
+  id               String   @id @default(uuid())
+  walletId         String
+  requesterId      String
+  recipientAddress String
+  amount           Decimal
+  status           String   // PENDING, APPROVED_PENDING_EXECUTION, EXECUTED, REJECTED
+  txHash           String?
+  processedAt      DateTime? 
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  wallet    Wallet     @relation(fields: [walletId], references: [id])
+  approvals Approval[]
+}
+
+model Approval {
+  id         String   @id @default(uuid())
+  requestId  String
+  approverId String
+  status     String   @default("APPROVED")
+  createdAt  DateTime @default(now())
+  
+  request    TransferRequest @relation(fields: [requestId], references: [id])
+  @@unique([requestId, approverId]) // 중복 승인 방지
+}
+
+// 5. 감사 및 로그 (Audit)
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String
+  actorId     String
+  requestId   String?
+  prevHash    String
+  currentHash String   // Hash Chaining
+  timestamp   DateTime @default(now())
+}
+
+model ReconciliationRecord {
+  id             String   @id @default(uuid())
+  walletId       String
+  txHash         String   @unique
+  onChainAmount  Decimal
+  offChainAmount Decimal?
+  status         String   // MATCHED, MISMATCH, UNLICENSED
+  checkedAt      DateTime @default(now())
+  wallet         Wallet   @relation(fields: [walletId], references: [id])
+}
+
+model SecurityAlert {
+  id        String   @id @default(uuid())
+  severity  String
+  message   String
+  rawData   String?  // [추가] 이 필드가 없어서 에러 발생 중
+  createdAt DateTime @default(now())
+}
+
+model WalletPolicy {
+  id         String   @id @default(uuid())
+  walletId   String   @unique
+  dailyLimit Decimal
+  wallet     Wallet   @relation(fields: [walletId], references: [id])
+}
+
+model AddressWhitelist {
+  id        String   @id @default(uuid())
+  address   String   @unique
+  createdAt DateTime @default(now())
+}
