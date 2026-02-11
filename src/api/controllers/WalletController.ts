@@ -1,9 +1,10 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { kmsClient } from '../../config/kmsConfig';
-import { CreateKeyCommand } from '@aws-sdk/client-kms';
+import { CreateKeyCommand, GetPublicKeyCommand } from '@aws-sdk/client-kms';
 import { ethers } from 'ethers';
 import axios from 'axios';
+import { getEthereumAddressFromKMS } from '../../utils/kmsUtils';
 
 const prisma = new PrismaClient();
 
@@ -14,7 +15,7 @@ export class WalletController {
       console.log('Creating key in AWS KMS...');
 
       const createCommand = new CreateKeyCommand({
-        Description: `NPC Wallet for Org ${orgId}`,
+        Description: `MPC Wallet for Org ${orgId}`,
         KeyUsage: 'SIGN_VERIFY',
         CustomerMasterKeySpec: 'ECC_SECG_P256K1',
         Origin: 'AWS_KMS',
@@ -22,36 +23,26 @@ export class WalletController {
 
       const createRes = await kmsClient.send(createCommand);
       const kmsKeyId = createRes.KeyMetadata?.KeyId;
+
       if (!kmsKeyId) throw new Error('Failed to create KMS Key');
       console.log(`AWS KMS Key Created: ${kmsKeyId}`);
 
       const getPubKeyCommand = new GetPublicKeyCommand({
-        keyId: kmsKeyId,
+        KeyId: kmsKeyId,
       });
       const pubKeyRes = await kmsClient.send(getPubKeyCommand);
+
       if (!pubKeyRes.PublicKey) throw new Error('Failed to retrieve public key');
 
-      const realAddress = getEthereumAddressFromKMS(pubKeyRes.PublicKey);
-      console.log(`Drived Ethereum Address: ${realAddress}`);
-
-      const address = realAddress;
-      let etherscanStatus = 'Not Checked';
-      if (process.env.ETHERSCAN_API_KEY) {
-        const url = `https://api-sepolia.etherscan.io/api?module=account&action=balance&address=${address}&tag=latest&apikey=${process.env.ETHERSCAN_API_KEY}`;
-        try {
-          await axios.get(url);
-          etherscanStatus = 'Verified (Valid Address)';
-        } catch (e) {
-          etherscanStatus = 'Etherscan Error';
-        }
-      }
+      const realAddress = getEthereumAddressFromKMS(pubKeyRes.PublicKey as Uint8Array);
+      console.log(`Derived Ethereum Address: ${realAddress}`);
 
       const newWallet = await prisma.wallet.create({
         data: {
           orgId,
-          address,
+          address: realAddress,
           kmsKeyId,
-          type: type || 'MPc',
+          type: type || 'MPC',
           thresholdCount: 2,
         },
       });
@@ -60,7 +51,6 @@ export class WalletController {
         message: 'Wallet Created Successfully',
         wallet: newWallet,
         awsKmsCheck: 'Success',
-        etherscanCheck: etherscanStatus,
       });
     } catch (error: any) {
       console.error('Wallet Creation Error:', error);
@@ -70,7 +60,7 @@ export class WalletController {
 
   async getWallets(req: Request, res: Response) {
     try {
-      const { orgId } = req.params;
+      const { orgId } = req.params as { orgId: string };
 
       const wallets = await prisma.wallet.findMany({
         where: { orgId },
