@@ -36,6 +36,7 @@ model Wallet {
   privateKey     String?
   thresholdCount Int      @default(2) // 2-of-n
   kmsKeyId       String   // AWS KMS Master Key ID
+  type           String   @default("MPC")
   createdAt      DateTime @default(now())
   
   organization   Organization @relation(fields: [orgId], references: [id])
