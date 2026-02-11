@@ -24,6 +24,7 @@
     "@aws-sdk/client-kms": "^3.985.0",
     "@prisma/client": "^6.19.2",
     "asn1.js": "^5.4.1",
+    "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.4",
